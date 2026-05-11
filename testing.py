@@ -12,7 +12,20 @@ def load_data():
     df = pd.read_csv(CSV_URL)
     df.columns = df.columns.str.strip()
     
-    # ADDED: Ind2ELA_All_Rate and Ind2Math_All_Rate
+    # Define columns to be used in dashboard
+    cols_to_keep = [
+        'RptngDistrictName', 'SchoolName', 'Accountability Index', 
+        'Ind4Rate', 'Ind9Rate', 'Ind10Rate', 
+        'Ind1ELA_All_Points', 'Ind1Math_All_Points', 'Ind1Sci_All_Points', 
+        'Ind11FitnessRate', 'Ind12Rate', 
+        'Ind2ELA_All_Rate', 'Ind2Math_All_Rate', 
+        'Category', 'StudentGroup', 'FallOfYear'
+    ]
+    
+    # Filter the dataframe to only include these columns
+    existing_cols = [col for col in cols_to_keep if col in df.columns]
+    df = df[existing_cols]
+    
     numeric_cols = [
         'Ind4Rate', 'Accountability Index', 'Ind9Rate', 'Ind10Rate',
         'Ind1ELA_All_Points', 'Ind1Math_All_Points', 
@@ -20,26 +33,29 @@ def load_data():
         'Ind2ELA_All_Rate', 'Ind2Math_All_Rate', 'FallOfYear'
     ]
     
+    # Convert to numbers and forcing bad data into NaN
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
-    # NEW: Calculate Average Academic Growth
+    # Calculate Average Academic Growth
     if 'Ind2ELA_All_Rate' in df.columns and 'Ind2Math_All_Rate' in df.columns:
-        # axis=1 tells pandas to average the row across these two columns
         df['Academic_Growth_Avg'] = df[['Ind2ELA_All_Rate', 'Ind2Math_All_Rate']].mean(axis=1)
     else:
         df['Academic_Growth_Avg'] = None
     
-    # Normalize Decimals to Percentages
+    # 5. Normalize Decimals to Percentages
     if df['Ind9Rate'].max() <= 1.1: df['Ind9Rate'] *= 100
     if df['Ind4Rate'].max() <= 1.1: df['Ind4Rate'] *= 100
     if 'Ind11FitnessRate' in df.columns and df['Ind11FitnessRate'].max() <= 1.1: 
         df['Ind11FitnessRate'] *= 100
     if 'Ind12Rate' in df.columns and df['Ind12Rate'].max() <= 1.1: 
         df['Ind12Rate'] *= 100
-    if df['Academic_Growth_Avg'].max() <= 1.1: 
+    if 'Academic_Growth_Avg' in df.columns and df['Academic_Growth_Avg'].max() <= 1.1: 
         df['Academic_Growth_Avg'] *= 100
+        
+    # 6. Drop completely empty rows
+    df = df.dropna(subset=['Accountability Index', 'RptngDistrictName'], how='all')
         
     return df
 
@@ -63,19 +79,19 @@ CAT_COL = 'Category'
 GROUP_COL = 'StudentGroup'
 YEAR_COL = 'FallOfYear'
 
-# SIDEBAR FILTERS
+# FILTERS
 st.sidebar.header("Filters")
 
-# 1. Year Filter
+# Year Filter
 years_list = sorted(df[YEAR_COL].dropna().unique().astype(int), reverse=True)
 options = ["All Years"] + [str(y) for y in years_list]
 selected_year_option = st.sidebar.selectbox("Select School Year", options=options)
 
-# 2. District Filter
+# District Filter
 districts = sorted(df[DIST_COL].dropna().unique())
 selected_dist = st.sidebar.multiselect("Select District", options=districts, default=["Bridgeport School District"])
 
-# 3. School Filter
+# School Filter
 school_options = sorted(df[df[DIST_COL].isin(selected_dist)][SCH_COL].unique())
 selected_schools = st.sidebar.multiselect("Select School", options=school_options)
 
@@ -112,12 +128,13 @@ with st.expander( "The Accountability Index", expanded=True):
         3. The Index awards points for:
         * Arts Access: Does the school offer music, theater, and art?
         * Physical Fitness: Are students healthy and active?
-        * College Prep: Is the school actually getting students ready for the real world?
+        * College Prep: Is the school getting students ready for the real world?
         """)
         
     st.info("""
     A score of **75** is the 'Passing Grade' set by Connecticut. Keep in mind that a school with a low bar in our charts can mean they are struggling with things like attendance or academic growth, not just poor testing grades.
     """)
+    st.info('In this dashboard, Accountability Index and \'success\' are used interchangeably.')
 
 # PERFORMANCE
 m1, m2, m3 = st.columns(3)
@@ -129,6 +146,12 @@ st.divider()
 
 # SECTION 1: ACHIEVEMENT VS GROWTH
 st.header("1. How do Academic Achievement and Academic Growth relate?")
+
+st.markdown('Academic achievement looks at current student test scores, while academic growth looks at the progress made over the school year, whether that is from an F to a C or a B to an A. This graph shows the relationship between these two factors')
+st.markdown('It is expected that higher academic achievement correlates positively with academic growth. Those that improve student learning also earn higher scores.')
+
+st.info('Data from the Bridgeport School District from all years shows a positive trend, as expected. Looking at individual years also shows the same trend. This relationship is strongly supported.')
+
 if not filtered_df.empty:
     fig_scatter, ax = plt.subplots(figsize=(10, 6))
     sns.scatterplot(data=filtered_df, x=INDEX_COL, y=GROWTH_COL, ax=ax, s=100, color='blue', alpha=0.6)
@@ -144,6 +167,11 @@ st.divider()
 
 # SECTION 2: CHRONIC ABSENTEEISM
 st.header("2. Does Chronic Absenteeism Impact Student Performance?")
+
+st.markdown('This graph shows whether showing up to class matters to success. The height of a bar represents its Accountability Index, and the color represents chronic absenteeism rates. A darker red shows a problem with absenteeism.')
+
+st.info('Schools from the Bridgeport School District show a clear trend. Schools with higher bars, or accountability indices, have darker green. Most of the students regularly attend classes at these schools, like Multicultural Magnet School and Interdistrict Discovery Magnet School. Schools with scores even below 50 have a deep red, like Warren Harding. These schools have a serious problem of students not attending class.')
+
 if not filtered_df.empty:
     # Grouping by school
     absent_summary = filtered_df.groupby(SCH_COL)[[INDEX_COL, ABSENT_COL]].mean().reset_index()
@@ -158,8 +186,13 @@ st.divider()
 
 # SECTION 3: GRADUATION GAPS
 st.header("3. Are Graduation Rates Consistent Across All Schools?")
+
+st.markdown('Graduating high school may not be a universal constant. The chance of graduating may change depending on which school students attend. This graph explores the relationship between graduation rates and Accountability Index.')
+
+st.info('The Bridgeport school district has a generally positive trend between graduation rate and accountability index. This is reasonable, as schools that do not perform well are less likely to retain students. They may not attend class or dropout, leading to a lower graduation rate. There are some outliers at around an index of 52, all of which are Bridgeport Military Academy from different years. This may be attributed to the different nature of a military academy.')
+
 if not filtered_df.empty:
-# Filter out "All Students" category to see specific group gaps more clearly
+# Filter out "All Students"
     group_df = filtered_df[filtered_df[CAT_COL] != 'All Students'].dropna(subset=[GRAD_COL, INDEX_COL])
 
 # Interactive Plotly scatter
@@ -183,6 +216,11 @@ st.divider()
 
 # SECTION 4: SUBJECT BREAKDOWN
 st.header("4. What is Driving the Score? ELA, Math, and Science")
+
+st.markdown('This grouped bar chart goes into the academics of the index, showing where students are meeting standards or falling behind in different academic subjects.')
+
+st.info('There is a consistent pattern visible in almost all schools of the Bridgeport school district. ELA contributes the most to the academic points of the Accountability Index, followed by math, then science. It does not necessarily matter what success score the school has; each subject follows closely behind the next in this step pattern. This difference is heightened in schools with higher success scores, but it is still present in other ones.')
+
 if not filtered_df.empty:
     subject_map = {'Ind1ELA_All_Points': 'ELA', 'Ind1Math_All_Points': 'Math', 'Ind1Sci_All_Points': 'Science'}
     # Average subjects by school if "All Years" is selected
@@ -196,23 +234,22 @@ st.divider()
 
 # SECTION 5: NON ACADEMICS
 st.header("5. Do Non-Academic Factors Correlate with Success?")
-st.markdown("""
-This section explores the link between **Physical Fitness** (Indicator 11), **Arts Access** (Indicator 12), and overall school performance. 
-If the trendlines slope upward, it suggests that schools with healthier, more creatively engaged students also tend to achieve higher overall accountability scores.
-""")
+
+st.markdown('The Accountability Index importantly takes into account physical fitness scores and arts access, looking beyond pure academic ratings. It shows whether fitness and creativity can create a more successful student, and in turn, a more successful school.')
+
+st.info('The data points for Bridgeport district schools across all years in both physical fitness and arts are very scattered. It would almost be difficult to spot the positive trend of physical fitness with success if the trend line was not there. Surprisingly, arts access shows a slightly negative correlation with success. Due to the very low R2 values, it is possible that other districts, or even years, show opposite correlations. For example, this same school district in 2024 has a positive correlation of arts access with success, but just barely.')
 
 if not filtered_df.empty:
-    # Create two columns for side-by-side graphs
     col1, col2 = st.columns(2)
     
-    # --- Graph 5A: Physical Fitness ---
+    # Physical Fitness Graph
     with col1:
         if 'Ind11FitnessRate' in filtered_df.columns:
             fig_fitness = px.scatter(
                 filtered_df, 
                 x='Ind11FitnessRate', 
                 y=INDEX_COL,
-                color=DIST_COL, # Color by district
+                color=DIST_COL,
                 hover_data=[SCH_COL],
                 labels={
                     'Ind11FitnessRate': 'Physical Fitness Rate (%)',
@@ -220,30 +257,30 @@ if not filtered_df.empty:
                 },
                 title="Physical Fitness vs. Success",
                 template="plotly_white",
-                trendline="ols",             # <-- ADDED: Ordinary Least Squares trendline
-                trendline_scope="overall"    # <-- ADDED: Draws one master line instead of one per district
+                trendline="ols",             
+                trendline_scope="overall"    
             )
-            # Add styling to the dots
+            
             fig_fitness.update_traces(marker=dict(size=8, opacity=0.7, line=dict(width=1, color='DarkSlateGrey')))
-            # Make the trendline bold and black so it stands out
+            
             fig_fitness.update_traces(line=dict(color="black", width=3), selector=dict(mode="lines"))
             
             st.plotly_chart(fig_fitness, use_container_width=True)
             
-            # Insight Box
+            # Correlation
             fitness_corr = filtered_df['Ind11FitnessRate'].corr(filtered_df[INDEX_COL])
             st.info(f"**Fitness Correlation:** {fitness_corr:.2f}")
         else:
             st.warning("Physical Fitness data not found.")
 
-    # --- Graph 5B: Arts Access ---
+    # Arts Access Graph
     with col2:
         if 'Ind12Rate' in filtered_df.columns:
             fig_arts = px.scatter(
                 filtered_df, 
                 x='Ind12Rate', 
                 y=INDEX_COL,
-                color=DIST_COL, # Color by district
+                color=DIST_COL, 
                 hover_data=[SCH_COL],
                 labels={
                     'Ind12Rate': 'Arts Access Rate (%)',
@@ -251,17 +288,17 @@ if not filtered_df.empty:
                 },
                 title="Arts Access vs. Success",
                 template="plotly_white",
-                trendline="ols",             # <-- ADDED: Ordinary Least Squares trendline
-                trendline_scope="overall"    # <-- ADDED: Draws one master line instead of one per district
+                trendline="ols",            
+                trendline_scope="overall"  
             )
-            # Add styling to the dots
+            
             fig_arts.update_traces(marker=dict(size=8, opacity=0.7, line=dict(width=1, color='DarkSlateGrey')))
-            # Make the trendline bold and black so it stands out
+            
             fig_arts.update_traces(line=dict(color="black", width=3), selector=dict(mode="lines"))
             
             st.plotly_chart(fig_arts, use_container_width=True)
             
-            # Insight Box
+            # Correlation
             arts_corr = filtered_df['Ind12Rate'].corr(filtered_df[INDEX_COL])
             st.info(f"**Arts Correlation:** {arts_corr:.2f}")
         else:
@@ -273,6 +310,10 @@ st.divider()
 
 # SECTION 6: STRONGEST PREDICTORS
 st.header("6. Which indicators are the strongest predictors of overall school performance?")
+
+st.markdown('This graph shows the correlation, if any, of academic, non-academic, and other factors with success. A more green score, to the right, indicates a positive impact on the school index, while a red score, to the left, indicates a negative impact on the school index.')
+
+st.info('The factors that contribute most positively to the Accountability Index of the Bridgeport School District are graduation rate and academic growth. Previous graphs showed the positive correlation between graduation and success, but it is now clear that this is one of the most important factors for this school district. Academic growth is also more strongly correlated with success than individual academic achievements. Again, arts access has a negative contribution here, but this often varies. What is very clear is that chronic absenteeism has a very negative correlation with success.')
 
 if not filtered_df.empty:
     predictor_cols = [
@@ -287,15 +328,15 @@ if not filtered_df.empty:
         'Ind4Rate': 'Chronic Absenteeism',
         'Ind9Rate': 'Graduation Rate',
         'Ind11FitnessRate': 'Physical Fitness',
-        'Ind12Rate': 'Arts Access',               # <-- Corrected
-        'Academic_Growth_Avg': 'Academic Growth'  # <-- Added new metric
+        'Ind12Rate': 'Arts Access',               
+        'Academic_Growth_Avg': 'Academic Growth'  
     }
     
     # Ensure columns exist
     available_cols = [c for c in predictor_cols if c in filtered_df.columns]
     
     if available_cols:
-        # Calculate the Pearson correlation with the Accountability Index
+        # Calculate Pearson correlation
         corr_data = filtered_df[available_cols + [INDEX_COL]].corr()[INDEX_COL].drop(INDEX_COL)
         
         # Format into a DataFrame
@@ -324,16 +365,15 @@ else:
 
 st.divider()
 
-# --- SECTION 7: DISTRICT DISPARITIES (BOXPLOT) ---
+# SECTION 7: DISTRICT DISPARITIES
 st.header("7. Are there disparities between districts in different indicators?")
-st.markdown("""
-This chart reveals the "gaps" in performance. 
-* A **short box** means all the schools in that district are performing similarly (high consistency). 
-* A **tall box** means there is a massive gap between the highest-performing and lowest-performing schools within the same district (high disparity).
-""")
+
+st.markdown('This boxplot shows not only a district\'s performance through each individual school, but how districts of different Accountability Indices fare against each other in different metrics.')
+
+st.info('Comparing two districts like Bridgeport and Darien shows the disparities in every factor investigated. The Accountability Index of Darien schools are higher than Bridgeport schools, and this follows for academic growth,  graduation rate, arts access, and somewhat physical fitness. Chronic absenteeism is very prevalent in the Bridgeport school district but is minimized to under 7 percent in the Darien school district. Physical fitness slightly overlaps for both districts, but Darien is still on the higher side of these scores.')
 
 if not filtered_df.empty:
-    # 1. Let the user choose WHICH indicator they want to look at
+    # Choose indicator
     disparity_metrics = {
         'Overall Success (Accountability Index)': INDEX_COL,
         'Academic Growth': GROWTH_COL,
@@ -343,17 +383,17 @@ if not filtered_df.empty:
         'Arts Access': 'Ind12Rate'
     }
     
-    # Filter out metrics that might be missing from the current dataset
+    # Filter out missing metrics
     available_metrics = {k: v for k, v in disparity_metrics.items() if v in filtered_df.columns}
     
     selected_metric_name = st.selectbox("Select an Indicator to analyze for disparities:", options=list(available_metrics.keys()))
     selected_metric_col = available_metrics[selected_metric_name]
     
-    # Quick check to ensure the user has selected more than one district
+    # Reminder to choose more than one district
     if len(selected_dist) < 2:
-        st.info("💡 **Tip:** Select at least **two** districts in the sidebar to compare disparities between them!")
+        st.info("Select at least two districts in the sidebar to compare disparities!")
 
-    # 2. Build the Boxplot
+    # Boxplot
     fig_box = px.box(
         filtered_df, 
         x=DIST_COL, 
@@ -365,27 +405,22 @@ if not filtered_df.empty:
         template="plotly_white"
     )
     
-    # Make it look clean
     fig_box.update_layout(
         xaxis_title="School District", 
         yaxis_title=selected_metric_name,
-        showlegend=False # We hide the legend because the x-axis already labels the districts
+        showlegend=False 
     )
     
     st.plotly_chart(fig_box, use_container_width=True)
 
-    # 3. District Scorecards (Integrated directly under the graph!)
-    
-    
-    # Calculate the average Accountability Index for each selected district
+    # Each District Accountability Index
     district_summary = filtered_df.groupby(DIST_COL)[INDEX_COL].mean().reset_index()
     num_districts = len(district_summary)
     
     if num_districts > 0:
-        # Create a dynamic number of columns based on their selection
         cols = st.columns(num_districts)
         
-        # Loop through each district and draw a metric box in its own column
+        # Loop through each district
         for index, row in district_summary.iterrows():
             district_name = row[DIST_COL]
             avg_score = row[INDEX_COL]
@@ -398,3 +433,8 @@ if not filtered_df.empty:
 
 else:
     st.warning("Please adjust filters to see the disparity analysis.")
+
+st.divider()
+
+# CONCLUSION
+st.info('In analyzing the Bridgeport school district, several strong positive and negative correlations of factors with success were seen. Inarguably, graduation rate and academic growth are very highly positively correlated with the Accountability Index. A sign that a school is able to retain its students is a strong indicator of the quality of that school. Academic growth is also very important, rather than just students achieving high test scores. This signifies the degree to which a student has learned and has been able to improve themselves. Schools with arts access and good physical fitness scores could have better success scores, but it is difficult to tell from these factors alone. Often, schools that already have high success scores have greater arts access and physical fitness scores. As epxected, academic achievement in subjects like ELA, math, and science support Accountability Index, but since this score is so well rounded, there are many other factors that determine the final value.')
