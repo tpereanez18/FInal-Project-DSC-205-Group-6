@@ -49,6 +49,7 @@ ABSENT_COL = 'Ind4Rate'
 GRAD_COL = 'Ind9Rate' 
 GROWTH_COL = 'Ind12Rate'
 CAT_COL = 'Category'
+GROUP_COL = 'StudentGroup'
 YEAR_COL = 'FallOfYear'
 
 # --- SIDEBAR FILTERS ---
@@ -150,13 +151,35 @@ if not filtered_df.empty:
 
 st.divider()
 
-# --- SECTION 3: GRADUATION ---
+# --- SECTION 3: GRADUATION GAPS (SCATTERPLOT BY STUDENT GROUP) ---
 st.header("3. Are Graduation Rates Consistent Across All Student Groups?")
 if not filtered_df.empty:
-    grad_summary = filtered_df.groupby(CAT_COL)[GRAD_COL].mean().reset_index().sort_values(GRAD_COL, ascending=False)
-    fig_group_grad = px.bar(grad_summary, x=CAT_COL, y=GRAD_COL, color=CAT_COL)
-    fig_group_grad.update_traces(texttemplate='%{y:.1f}%', textposition='outside')
-    st.plotly_chart(fig_group_grad, use_container_width=True)
+# Filter out the "All Students" category to see specific group gaps more clearly
+    group_df = filtered_df[filtered_df[CAT_COL] != 'All Students'].dropna(subset=[GRAD_COL, INDEX_COL])
+
+# Create an interactive Plotly scatter to allow hovering over group names
+    fig_groups = px.scatter(
+        group_df, 
+        x=INDEX_COL, 
+        y=GRAD_COL, 
+        color=CAT_COL,
+        hover_data=[SCH_COL],
+        title=f"Graduation Rates vs. Index by Student Group ({selected_year_option})",
+        labels={INDEX_COL: "Accountability Index", GRAD_COL: "Graduation Rate %", CAT_COL: "Student Group"}
+    )
+
+    fig_groups.update_traces(marker=dict(size=12, opacity=0.7))
+    st.plotly_chart(fig_groups, use_container_width=True)
+
+    st.info("""     **How to analyze this chart:**     * If the dots are all mixed together, graduation rates are consistent.     * **If certain colors (like 'Students with Disabilities' or 'English Learners') are consistently lower than others**, it shows a 'Graduation Gap' that the school needs to address.     """)
+else:
+    st.warning("No category-specific data available for this selection.")
+
+ 
+
+st.divider()
+
+
 
 st.divider()
 
@@ -186,3 +209,60 @@ if not heatmap_source.empty:
 # Raw Data Table
 if st.checkbox("Show Raw Data Table"):
     st.dataframe(filtered_df)
+
+st.divider()
+
+# --- SECTION 6: STRONGEST PREDICTORS ---
+st.header("6. Which indicators are the strongest predictors of overall school performance?")
+st.markdown("This chart shows the **correlation** between various school indicators and the overall Accountability Index. Items stretching further to the right have the strongest positive relationship with overall performance, while items stretching to the left (like Absenteeism) pull the score down.")
+
+if not filtered_df.empty:
+    # 1. Define the predictor columns to test against the Accountability Index
+    predictor_cols = [
+        'Ind1ELA_All_Points', 'Ind1Math_All_Points', 'Ind1Sci_All_Points',
+        'Ind4Rate', 'Ind9Rate', 'Ind11FitnessRate', 'Ind12Rate'
+    ]
+    
+    # 2. Map them to reader-friendly names for the chart
+    friendly_names = {
+        'Ind1ELA_All_Points': 'ELA Achievement',
+        'Ind1Math_All_Points': 'Math Achievement',
+        'Ind1Sci_All_Points': 'Science Achievement',
+        'Ind4Rate': 'Chronic Absenteeism',
+        'Ind9Rate': 'Graduation Rate',
+        'Ind11FitnessRate': 'Physical Fitness',
+        'Ind12Rate': 'Academic Growth'
+    }
+    
+    # Ensure columns exist in the current dataframe subset
+    available_cols = [c for c in predictor_cols if c in filtered_df.columns]
+    
+    if available_cols:
+        # 3. Calculate the Pearson correlation with the Accountability Index
+        # We drop the Index itself so it doesn't plot a perfect 1.0 correlation with itself
+        corr_data = filtered_df[available_cols + [INDEX_COL]].corr()[INDEX_COL].drop(INDEX_COL)
+        
+        # 4. Format into a DataFrame for Plotly Express
+        corr_df = corr_data.reset_index()
+        corr_df.columns = ['Indicator', 'Correlation']
+        corr_df['Indicator'] = corr_df['Indicator'].map(friendly_names)
+        
+        # Sort values so the graph looks clean and descending
+        corr_df = corr_df.sort_values(by='Correlation', ascending=True)
+        
+        # 5. Build the horizontal bar chart
+        fig_predictors = px.bar(
+            corr_df, 
+            x='Correlation', 
+            y='Indicator', 
+            orientation='h',
+            color='Correlation',
+            color_continuous_scale='RdYlGn', # Red (negative) to Green (positive)
+            text_auto='.2f', # Show the exact decimal on the bars
+            title=f"Predictors of School Success ({selected_year_option})"
+        )
+        
+        fig_predictors.update_layout(xaxis_title="Correlation Coefficient (-1.0 to 1.0)", yaxis_title="")
+        st.plotly_chart(fig_predictors, use_container_width=True)
+else:
+    st.warning("Please adjust filters to see the predictor analysis.")
