@@ -12,16 +12,24 @@ def load_data():
     df = pd.read_csv(CSV_URL)
     df.columns = df.columns.str.strip()
     
-    # Core columns for analysis
+    # ADDED: Ind2ELA_All_Rate and Ind2Math_All_Rate
     numeric_cols = [
         'Ind4Rate', 'Accountability Index', 'Ind9Rate', 'Ind10Rate',
         'Ind1ELA_All_Points', 'Ind1Math_All_Points', 
-        'Ind1Sci_All_Points', 'Ind11FitnessRate', 'Ind12Rate', 'FallOfYear'
+        'Ind1Sci_All_Points', 'Ind11FitnessRate', 'Ind12Rate', 
+        'Ind2ELA_All_Rate', 'Ind2Math_All_Rate', 'FallOfYear'
     ]
     
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+    # NEW: Calculate Average Academic Growth
+    if 'Ind2ELA_All_Rate' in df.columns and 'Ind2Math_All_Rate' in df.columns:
+        # axis=1 tells pandas to average the row across these two columns
+        df['Academic_Growth_Avg'] = df[['Ind2ELA_All_Rate', 'Ind2Math_All_Rate']].mean(axis=1)
+    else:
+        df['Academic_Growth_Avg'] = None
     
     # Normalize Decimals to Percentages
     if df['Ind9Rate'].max() <= 1.1: df['Ind9Rate'] *= 100
@@ -30,6 +38,8 @@ def load_data():
         df['Ind11FitnessRate'] *= 100
     if 'Ind12Rate' in df.columns and df['Ind12Rate'].max() <= 1.1: 
         df['Ind12Rate'] *= 100
+    if df['Academic_Growth_Avg'].max() <= 1.1: 
+        df['Academic_Growth_Avg'] *= 100
         
     return df
 
@@ -47,7 +57,8 @@ SCH_COL = 'SchoolName'
 INDEX_COL = 'Accountability Index'
 ABSENT_COL = 'Ind4Rate' 
 GRAD_COL = 'Ind9Rate' 
-GROWTH_COL = 'Ind12Rate'
+GROWTH_COL = 'Academic_Growth_Avg'   # Calculated
+ARTS_COL = 'Ind12Rate'               
 CAT_COL = 'Category'
 GROUP_COL = 'StudentGroup'
 YEAR_COL = 'FallOfYear'
@@ -183,13 +194,90 @@ if not filtered_df.empty:
 
 st.divider()
 
+# SECTION 5: NON ACADEMICS
+st.header("5. Do Non-Academic Factors Correlate with Success?")
+st.markdown("""
+This section explores the link between **Physical Fitness** (Indicator 11), **Arts Access** (Indicator 12), and overall school performance. 
+If the trendlines slope upward, it suggests that schools with healthier, more creatively engaged students also tend to achieve higher overall accountability scores.
+""")
+
+if not filtered_df.empty:
+    # Create two columns for side-by-side graphs
+    col1, col2 = st.columns(2)
+    
+    # --- Graph 5A: Physical Fitness ---
+    with col1:
+        if 'Ind11FitnessRate' in filtered_df.columns:
+            fig_fitness = px.scatter(
+                filtered_df, 
+                x='Ind11FitnessRate', 
+                y=INDEX_COL,
+                color=DIST_COL, # Color by district
+                hover_data=[SCH_COL],
+                labels={
+                    'Ind11FitnessRate': 'Physical Fitness Rate (%)',
+                    INDEX_COL: 'Accountability Index'
+                },
+                title="Physical Fitness vs. Success",
+                template="plotly_white",
+                trendline="ols",             # <-- ADDED: Ordinary Least Squares trendline
+                trendline_scope="overall"    # <-- ADDED: Draws one master line instead of one per district
+            )
+            # Add styling to the dots
+            fig_fitness.update_traces(marker=dict(size=8, opacity=0.7, line=dict(width=1, color='DarkSlateGrey')))
+            # Make the trendline bold and black so it stands out
+            fig_fitness.update_traces(line=dict(color="black", width=3), selector=dict(mode="lines"))
+            
+            st.plotly_chart(fig_fitness, use_container_width=True)
+            
+            # Insight Box
+            fitness_corr = filtered_df['Ind11FitnessRate'].corr(filtered_df[INDEX_COL])
+            st.info(f"**Fitness Correlation:** {fitness_corr:.2f}")
+        else:
+            st.warning("Physical Fitness data not found.")
+
+    # --- Graph 5B: Arts Access ---
+    with col2:
+        if 'Ind12Rate' in filtered_df.columns:
+            fig_arts = px.scatter(
+                filtered_df, 
+                x='Ind12Rate', 
+                y=INDEX_COL,
+                color=DIST_COL, # Color by district
+                hover_data=[SCH_COL],
+                labels={
+                    'Ind12Rate': 'Arts Access Rate (%)',
+                    INDEX_COL: 'Accountability Index'
+                },
+                title="Arts Access vs. Success",
+                template="plotly_white",
+                trendline="ols",             # <-- ADDED: Ordinary Least Squares trendline
+                trendline_scope="overall"    # <-- ADDED: Draws one master line instead of one per district
+            )
+            # Add styling to the dots
+            fig_arts.update_traces(marker=dict(size=8, opacity=0.7, line=dict(width=1, color='DarkSlateGrey')))
+            # Make the trendline bold and black so it stands out
+            fig_arts.update_traces(line=dict(color="black", width=3), selector=dict(mode="lines"))
+            
+            st.plotly_chart(fig_arts, use_container_width=True)
+            
+            # Insight Box
+            arts_corr = filtered_df['Ind12Rate'].corr(filtered_df[INDEX_COL])
+            st.info(f"**Arts Correlation:** {arts_corr:.2f}")
+        else:
+            st.warning("Arts Access data not found.")
+else:
+    st.warning("Please adjust filters to see the non-academic analysis.")
+
+st.divider()
+
 # SECTION 6: STRONGEST PREDICTORS
 st.header("6. Which indicators are the strongest predictors of overall school performance?")
 
 if not filtered_df.empty:
     predictor_cols = [
         'Ind1ELA_All_Points', 'Ind1Math_All_Points', 'Ind1Sci_All_Points',
-        'Ind4Rate', 'Ind9Rate', 'Ind11FitnessRate', 'Ind12Rate'
+        'Ind4Rate', 'Ind9Rate', 'Ind11FitnessRate', 'Ind12Rate', 'Academic_Growth_Avg'
     ]
     
     friendly_names = {
@@ -199,7 +287,8 @@ if not filtered_df.empty:
         'Ind4Rate': 'Chronic Absenteeism',
         'Ind9Rate': 'Graduation Rate',
         'Ind11FitnessRate': 'Physical Fitness',
-        'Ind12Rate': 'Academic Growth'
+        'Ind12Rate': 'Arts Access',               # <-- Corrected
+        'Academic_Growth_Avg': 'Academic Growth'  # <-- Added new metric
     }
     
     # Ensure columns exist
@@ -235,4 +324,77 @@ else:
 
 st.divider()
 
-# --- SECTION 6: STRONGEST PREDICTORS ---
+# --- SECTION 7: DISTRICT DISPARITIES (BOXPLOT) ---
+st.header("7. Are there disparities between districts in different indicators?")
+st.markdown("""
+This chart reveals the "gaps" in performance. 
+* A **short box** means all the schools in that district are performing similarly (high consistency). 
+* A **tall box** means there is a massive gap between the highest-performing and lowest-performing schools within the same district (high disparity).
+""")
+
+if not filtered_df.empty:
+    # 1. Let the user choose WHICH indicator they want to look at
+    disparity_metrics = {
+        'Overall Success (Accountability Index)': INDEX_COL,
+        'Academic Growth': GROWTH_COL,
+        'Chronic Absenteeism': ABSENT_COL,
+        'Graduation Rate': GRAD_COL,
+        'Physical Fitness': 'Ind11FitnessRate',
+        'Arts Access': 'Ind12Rate'
+    }
+    
+    # Filter out metrics that might be missing from the current dataset
+    available_metrics = {k: v for k, v in disparity_metrics.items() if v in filtered_df.columns}
+    
+    selected_metric_name = st.selectbox("Select an Indicator to analyze for disparities:", options=list(available_metrics.keys()))
+    selected_metric_col = available_metrics[selected_metric_name]
+    
+    # Quick check to ensure the user has selected more than one district
+    if len(selected_dist) < 2:
+        st.info("💡 **Tip:** Select at least **two** districts in the sidebar to compare disparities between them!")
+
+    # 2. Build the Boxplot
+    fig_box = px.box(
+        filtered_df, 
+        x=DIST_COL, 
+        y=selected_metric_col, 
+        color=DIST_COL,
+        points="all", # This overlays the actual schools as dots next to the boxes!
+        hover_data=[SCH_COL], # Show the school name when hovering over a dot
+        title=f"Disparities in {selected_metric_name} by District",
+        template="plotly_white"
+    )
+    
+    # Make it look clean
+    fig_box.update_layout(
+        xaxis_title="School District", 
+        yaxis_title=selected_metric_name,
+        showlegend=False # We hide the legend because the x-axis already labels the districts
+    )
+    
+    st.plotly_chart(fig_box, use_container_width=True)
+
+    # 3. District Scorecards (Integrated directly under the graph!)
+    
+    
+    # Calculate the average Accountability Index for each selected district
+    district_summary = filtered_df.groupby(DIST_COL)[INDEX_COL].mean().reset_index()
+    num_districts = len(district_summary)
+    
+    if num_districts > 0:
+        # Create a dynamic number of columns based on their selection
+        cols = st.columns(num_districts)
+        
+        # Loop through each district and draw a metric box in its own column
+        for index, row in district_summary.iterrows():
+            district_name = row[DIST_COL]
+            avg_score = row[INDEX_COL]
+            
+            with cols[index]:
+                st.metric(
+                    label=f"{district_name}", 
+                    value=f"{avg_score:.1f}"
+                )
+
+else:
+    st.warning("Please adjust filters to see the disparity analysis.")
